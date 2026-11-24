@@ -1,0 +1,178 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Conta
+// ---------------------------------------------------------------------------
+
+model Holder {
+  id        String    @id @default(uuid()) @db.Uuid
+  fullName  String    @map("full_name")
+  email     String    @unique
+  password  String
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  records    HealthRecord[]
+  indicators Indicator[]
+  reminders  Reminder[]
+
+  @@map("holders")
+}
+
+// ---------------------------------------------------------------------------
+// Histórico
+// ---------------------------------------------------------------------------
+
+enum HealthRecordKind {
+  CONSULTATION
+  EXAM
+  VACCINE
+  PRESCRIPTION
+  OTHER
+
+  @@map("health_record_kind")
+}
+
+model HealthRecord {
+  id          String           @id @default(uuid()) @db.Uuid
+  holderId    String           @map("holder_id") @db.Uuid
+  kind        HealthRecordKind
+  title       String
+  description String?
+  occurredAt  DateTime         @map("occurred_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  holder      Holder       @relation(fields: [holderId], references: [id])
+  attachments Attachment[]
+
+  @@index([holderId, occurredAt])
+  @@map("health_records")
+}
+
+// Metadados do anexo; o binário fica no armazenamento de anexos.
+model Attachment {
+  id         String   @id @default(uuid()) @db.Uuid
+  recordId   String   @map("record_id") @db.Uuid
+  storageKey String   @unique @map("storage_key")
+  fileName   String   @map("file_name")
+  mimeType   String   @map("mime_type")
+  sizeBytes  Int      @map("size_bytes")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  record HealthRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Indicadores
+// ---------------------------------------------------------------------------
+
+model Indicator {
+  id         String   @id @default(uuid()) @db.Uuid
+  holderId   String   @map("holder_id") @db.Uuid
+  type       String   @db.VarChar(60)
+  value      Decimal  @db.Decimal(10, 2)
+  unit       String   @db.VarChar(20)
+  measuredAt DateTime @map("measured_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  holder Holder @relation(fields: [holderId], references: [id])
+
+  @@index([holderId, type, measuredAt])
+  @@map("indicators")
+}
+
+// ---------------------------------------------------------------------------
+// Lembretes (agendamentos)
+// ---------------------------------------------------------------------------
+
+enum ReminderStatus {
+  SCHEDULED
+  CANCELLED
+  DONE
+
+  @@map("reminder_status")
+}
+
+model Reminder {
+  id        String         @id @default(uuid()) @db.Uuid
+  holderId  String         @map("holder_id") @db.Uuid
+  title     String
+  notes     String?
+  remindAt  DateTime       @map("remind_at")
+  status    ReminderStatus @default(SCHEDULED)
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  holder        Holder                 @relation(fields: [holderId], references: [id])
+  notifications NotificationDelivery[]
+
+  @@index([holderId, remindAt])
+  @@map("reminders")
+}
+
+// Aviso reservado pelo processador; entregue ao provedor de notificações.
+enum NotificationStatus {
+  RESERVED
+  SENT
+  FAILED
+  CANCELLED
+
+  @@map("notification_status")
+}
+
+model NotificationDelivery {
+  id           String             @id @default(uuid()) @db.Uuid
+  reminderId   String             @map("reminder_id") @db.Uuid
+  scheduledFor DateTime           @map("scheduled_for")
+  status       NotificationStatus @default(RESERVED)
+  attempts     Int                @default(0)
+  lastError    String?            @map("last_error")
+  sentAt       DateTime?          @map("sent_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+
+  reminder Reminder @relation(fields: [reminderId], references: [id])
+
+  @@unique([reminderId, scheduledFor])
+  @@index([status, scheduledFor])
+  @@map("notification_deliveries")
+}
+
+// ---------------------------------------------------------------------------
+// Outbox de eventos (gravado na mesma transação da escrita de negócio)
+// ---------------------------------------------------------------------------
+
+enum OutboxStatus {
+  PENDING
+  PROCESSED
+  FAILED
+
+  @@map("outbox_status")
+}
+
+model OutboxEvent {
+  id            String       @id @default(uuid()) @db.Uuid
+  aggregateType String       @map("aggregate_type")
+  aggregateId   String       @map("aggregate_id") @db.Uuid
+  type          String
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  lastError     String?      @map("last_error")
+  occurredAt    DateTime     @default(now()) @map("occurred_at")
+  processedAt   DateTime?    @map("processed_at")
+
+  @@index([status, occurredAt])
+  @@map("outbox_events")
+}

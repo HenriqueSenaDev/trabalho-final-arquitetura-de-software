@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "PersonalHealth",
+    "slug": "personal-health",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "personalhealth",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static"
+    },
+    "plugins": ["expo-router", "expo-font"],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

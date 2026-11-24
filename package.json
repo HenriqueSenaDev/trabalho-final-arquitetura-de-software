@@ -1,0 +1,24 @@
+{
+  "name": "personal-health",
+  "private": true,
+  "packageManager": "pnpm@11.1.1",
+  "scripts": {
+    "postinstall": "pnpm -F @personal-health/contracts -F @personal-health/database build",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev:api": "pnpm -F api dev",
+    "dev:worker": "pnpm -F worker dev",
+    "dev:mobile": "pnpm -F mobile dev",
+    "backup:run": "pnpm -F backup backup",
+    "backup:restore": "pnpm -F backup restore",
+    "db:generate": "pnpm -F @personal-health/database db:generate",
+    "db:migrate": "pnpm -F @personal-health/database db:migrate",
+    "db:deploy": "pnpm -F @personal-health/database db:deploy",
+    "db:reset": "pnpm -F @personal-health/database db:reset",
+    "db:studio": "pnpm -F @personal-health/database db:studio"
+  },
+  "devDependencies": {
+    "dotenv-cli": "^11.0.0"
+  }
+}
