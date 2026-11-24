@@ -9,7 +9,11 @@ import { PrismaClient } from '@personal-health/database';
 import { prepararBancoDeTeste } from '@personal-health/database/dist/banco-de-teste';
 import { PrismaAgendamentos } from '../../src/adaptadores/prisma-agendamentos';
 import { PrismaDestinos } from '../../src/adaptadores/prisma-destinos';
-import { EntregarAvisosDevidos, MENSAGEM_GENERICA } from '../../src/aplicacao/entregar-avisos-devidos';
+import { PrismaRelayOutbox } from '../../src/adaptadores/prisma-relay-outbox';
+import {
+  EntregarAvisosDevidos,
+  MENSAGEM_GENERICA,
+} from '../../src/aplicacao/entregar-avisos-devidos';
 import { PedidoDeEntrega, ProvedorDeNotificacoes } from '../../src/portas/provedor-de-notificacoes';
 import { Registro } from '../../src/portas/registro';
 
@@ -23,7 +27,11 @@ class ProvedorEspiao implements ProvedorDeNotificacoes {
   }
 }
 
-const registroMudo: Registro = { info: () => undefined, aviso: () => undefined, erro: () => undefined };
+const registroMudo: Registro = {
+  info: () => undefined,
+  aviso: () => undefined,
+  erro: () => undefined,
+};
 const configuracao = { lote: 20, reservaSegundos: 60, maxTentativas: 5, esperaBaseSegundos: 30 };
 
 describe('Processador de lembretes com banco real', () => {
@@ -63,6 +71,7 @@ describe('Processador de lembretes com banco real', () => {
   });
 
   beforeEach(async () => {
+    await prisma.$executeRaw`DELETE FROM eventos_outbox`;
     await prisma.agendamento.deleteMany();
     await prisma.sessao.deleteMany();
     await prisma.titular.deleteMany();
@@ -72,7 +81,13 @@ describe('Processador de lembretes com banco real', () => {
     });
     await prisma.sessao.createMany({
       data: [
-        { id: randomUUID(), titularId, tokenHash: randomUUID(), dispositivo: 'novo', tokenEntrega: 'token-novo' },
+        {
+          id: randomUUID(),
+          titularId,
+          tokenHash: randomUUID(),
+          dispositivo: 'novo',
+          tokenEntrega: 'token-novo',
+        },
         {
           id: randomUUID(),
           titularId,
@@ -83,6 +98,22 @@ describe('Processador de lembretes com banco real', () => {
         },
       ],
     });
+  });
+
+  it('consome eventos confirmados uma vez e mantém eventos desconhecidos pendentes', async () => {
+    const conhecido = randomUUID();
+    const desconhecido = randomUUID();
+    const origem = randomUUID();
+    await prisma.$executeRaw`INSERT INTO eventos_outbox (id, tipo, origem_id, titular_id, versao) VALUES
+      (${conhecido}::uuid, 'ReminderChanged', ${origem}::uuid, ${titularId}::uuid, 1),
+      (${desconhecido}::uuid, 'TRATAMENTO_ALTERADO', ${origem}::uuid, ${titularId}::uuid, 1)`;
+    const relay = new PrismaRelayOutbox(prisma);
+    assert.equal(await relay.executar(10), 1);
+    assert.equal(await relay.executar(10), 0);
+    const linhas = await prisma.$queryRaw<Array<{ id: string; processado_em: Date | null }>>`
+      SELECT id, processado_em FROM eventos_outbox`;
+    assert.ok(linhas.find((linha) => linha.id === conhecido)?.processado_em);
+    assert.equal(linhas.find((linha) => linha.id === desconhecido)?.processado_em, null);
   });
 
   it('entrega o aviso vencido só ao aparelho com sessão ativa e marca ENVIADO', async () => {
@@ -147,7 +178,9 @@ describe('Processador de lembretes com banco real', () => {
   });
 
   it('três réplicas em paralelo entregam cada aviso uma única vez', async () => {
-    const criados = await Promise.all(Array.from({ length: 12 }, () => agendar({ instante: haUmMinuto() })));
+    const criados = await Promise.all(
+      Array.from({ length: 12 }, () => agendar({ instante: haUmMinuto() })),
+    );
     const provedor = new ProvedorEspiao();
     const replica = async () => {
       const entregar = processador(provedor, 2);
