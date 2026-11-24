@@ -10,8 +10,22 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
-const SRC = resolve(__dirname, '../../src');
-const PACOTES_DE_INFRAESTRUTURA = [/^@nestjs\//, /^@personal-health\/database/, /^express$/, /^class-/];
+const RAIZ_WORKSPACE = resolve(__dirname, '../../../..');
+const SRC = resolve(RAIZ_WORKSPACE, 'apps/api/src');
+const WORKER_SRC = resolve(RAIZ_WORKSPACE, 'apps/worker/src');
+const CONTRACTS_SRC = resolve(RAIZ_WORKSPACE, 'packages/contracts/src');
+const PACOTES_DE_INFRAESTRUTURA = [
+  /^@nestjs\//,
+  /^@personal-health\/database/,
+  /^@prisma\//,
+  /^express$/,
+  /^class-/,
+  /^@aws-sdk\//,
+  /^@google-cloud\/storage/,
+  /^@azure\/storage-blob/,
+  /^minio$/,
+  /^@minio\//,
+];
 
 interface Importacao {
   arquivo: string; // relativo a src, com "/"
@@ -27,15 +41,15 @@ function arquivosTs(pasta: string): string[] {
   });
 }
 
-function importacoes(): Importacao[] {
-  return arquivosTs(SRC).flatMap((caminho) => {
+function importacoes(pasta: string, raiz = SRC, raizResolucao = raiz): Importacao[] {
+  return arquivosTs(pasta).flatMap((caminho) => {
     const codigo = readFileSync(caminho, 'utf8');
-    const arquivo = relative(SRC, caminho).split(sep).join('/');
+    const arquivo = relative(raiz, caminho).split(sep).join('/');
     return [...codigo.matchAll(/from\s+'([^']+)'/g)].map(([, alvo]) => ({
       arquivo,
       alvo,
       resolvido: alvo.startsWith('.')
-        ? relative(SRC, resolve(dirname(caminho), alvo)).split(sep).join('/')
+        ? relative(raizResolucao, resolve(dirname(caminho), alvo)).split(sep).join('/')
         : null,
     }));
   });
@@ -50,7 +64,9 @@ function localizar(caminho: string): { modulo: string | null; camada: string | n
 }
 
 const NUCLEO = ['dominio', 'aplicacao', 'portas'];
-const todas = importacoes();
+const todas = importacoes(SRC);
+const importsWorker = importacoes(WORKER_SRC, WORKER_SRC, RAIZ_WORKSPACE);
+const importsContracts = importacoes(CONTRACTS_SRC, CONTRACTS_SRC, RAIZ_WORKSPACE);
 
 describe('Arquitetura: regras de dependência', () => {
   it('encontra os arquivos de src (sanidade)', () => {
@@ -97,6 +113,35 @@ describe('Arquitetura: regras de dependência', () => {
         arquivo.endsWith('.module.ts') && resolvido === `modulos/${destino}/${destino}.module`;
       return !ehContrato && !ehComposicao;
     });
+    expect(violacoes).toEqual([]);
+  });
+
+  it('os arquivos novos do Histórico permanecem sujeitos às regras de camada', () => {
+    const arquivosHistorico = todas.filter(({ arquivo }) => arquivo.startsWith('modulos/historico/'));
+    expect(arquivosHistorico.length).toBeGreaterThan(20);
+    const dominiosComImportDeInfra = todas.filter(
+      ({ arquivo, alvo }) =>
+        arquivo.startsWith('modulos/historico/dominio/') &&
+        PACOTES_DE_INFRAESTRUTURA.some((padrao) => padrao.test(alvo)),
+    );
+    expect(dominiosComImportDeInfra).toEqual([]);
+  });
+
+  it('packages/contracts não depende de aplicações', () => {
+    const violacoes = importsContracts.filter(
+      ({ alvo, resolvido }) =>
+        /(^|\/)apps\//.test(alvo) ||
+        (resolvido !== null && !resolvido.startsWith('packages/contracts/')),
+    );
+    expect(violacoes).toEqual([]);
+  });
+
+  it('o worker não depende da API', () => {
+    const violacoes = importsWorker.filter(
+      ({ alvo, resolvido }) =>
+        /^@personal-health\/api(?:\/|$)/.test(alvo) ||
+        (resolvido !== null && resolvido.startsWith('apps/api/')),
+    );
     expect(violacoes).toEqual([]);
   });
 });

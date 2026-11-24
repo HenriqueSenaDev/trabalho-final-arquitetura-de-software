@@ -23,6 +23,9 @@ importers:
       '@nestjs/platform-express':
         specifier: ^11.0.0
         version: 11.2.11(@nestjs/common@11.2.11(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.11)
+      '@personal-health/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@personal-health/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -151,6 +154,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@personal-health/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@personal-health/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -164,6 +170,12 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.23.15
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
+  packages/contracts:
+    devDependencies:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
