@@ -1,4 +1,5 @@
 const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL ?? 'http://localhost:3000';
+const TEMPO_LIMITE_MS = 15_000;
 
 export class ApiError extends Error {
   constructor(
@@ -10,28 +11,52 @@ export class ApiError extends Error {
   }
 }
 
-/** Cliente HTTPS da API de Saúde. */
-export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response;
+interface Opcoes {
+  metodo?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  corpo?: unknown;
+  token?: string;
+}
+
+/**
+ * Cliente HTTPS da API de Saúde. O aplicativo só confirma uma operação
+ * depois da resposta do servidor e avisa quando a conexão a impede.
+ */
+export async function request<T>(caminho: string, opcoes: Opcoes = {}): Promise<T> {
+  const controle = new AbortController();
+  const limite = setTimeout(() => controle.abort(), TEMPO_LIMITE_MS);
+  let resposta: Response;
   try {
-    response = await fetch(`${BASE_URL}${path}`, {
-      ...init,
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
+    resposta = await fetch(`${BASE_URL}${caminho}`, {
+      method: opcoes.metodo ?? 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(opcoes.token ? { Authorization: `Bearer ${opcoes.token}` } : {}),
+      },
+      body: opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo),
+      signal: controle.signal,
     });
   } catch {
     throw new ApiError(
-      'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.',
+      'Não foi possível falar com o servidor. Verifique sua conexão e tente de novo.',
       0,
     );
+  } finally {
+    clearTimeout(limite);
   }
 
-  const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    const message =
-      typeof body === 'object' && body !== null && 'message' in body
-        ? String((body as { message: unknown }).message)
-        : 'Algo deu errado. Tente novamente.';
-    throw new ApiError(message, response.status);
+  if (resposta.status === 204) {
+    return undefined as T;
   }
-  return body as T;
+  const corpo: unknown = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new ApiError(mensagemDeErro(corpo), resposta.status);
+  }
+  return corpo as T;
+}
+
+function mensagemDeErro(corpo: unknown): string {
+  const mensagem = (corpo as { message?: unknown } | null)?.message;
+  if (Array.isArray(mensagem)) return mensagem.join('\n');
+  if (typeof mensagem === 'string') return mensagem;
+  return 'Algo deu errado. Tente de novo.';
 }

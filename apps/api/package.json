@@ -7,17 +7,15 @@
     "dev": "pnpm with-env nest start --watch",
     "build": "nest build",
     "start": "pnpm with-env node dist/main.js",
-    "typecheck": "tsc --noEmit",
-    "test": "jest --runInBand"
+    "seed": "pnpm with-env tsx scripts/semear.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "test": "jest --runInBand",
+    "test:e2e": "pnpm with-env jest --runInBand --config jest.e2e.config.cjs"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1146.0",
-    "@aws-sdk/s3-request-presigner": "^3.1146.0",
     "@nestjs/common": "^11.0.0",
-    "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
-    "@personal-health/contracts": "workspace:*",
     "@personal-health/database": "workspace:*",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
@@ -31,9 +29,12 @@
     "@types/express": "^5.0.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.0",
+    "@types/supertest": "^6.0.3",
     "dotenv-cli": "^11.0.0",
     "jest": "^29.7.0",
+    "supertest": "^7.1.0",
     "ts-jest": "^29.2.5",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
 }

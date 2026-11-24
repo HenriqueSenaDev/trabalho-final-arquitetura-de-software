@@ -1,3 +1,5 @@
+# Infraestrutura local do fluxo principal: só o Banco relacional.
+# Anexos, backup e repositório de backup (ADR 05) ficam fora desta prova de conceito.
 services:
   postgres:
     image: postgres:17
@@ -12,45 +14,5 @@ services:
     volumes:
       - personalhealth-db-data:/var/lib/postgresql/data
 
-  # Armazenamento de anexos: arquivos privados de exames
-  attachments-storage:
-    image: elestio/minio:latest
-    container_name: personalhealth-attachments
-    restart: unless-stopped
-    entrypoint: >
-      /bin/sh -c "
-      mkdir -p /data/personalhealth-attachments &&
-      minio server /data --console-address :9001
-      "
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - personalhealth-attachments-data:/data
-
-  # Repositório de backup: instância isolada, com credenciais próprias
-  backup-repository:
-    image: elestio/minio:latest
-    container_name: personalhealth-backup-repository
-    restart: unless-stopped
-    entrypoint: >
-      /bin/sh -c "
-      mkdir -p /data/personalhealth-backups &&
-      minio server /data --console-address :9101
-      "
-    environment:
-      MINIO_ROOT_USER: backupadmin
-      MINIO_ROOT_PASSWORD: backupadmin
-    ports:
-      - "9100:9000"
-      - "9101:9101"
-    volumes:
-      - personalhealth-backup-data:/data
-
 volumes:
   personalhealth-db-data:
-  personalhealth-attachments-data:
-  personalhealth-backup-data:

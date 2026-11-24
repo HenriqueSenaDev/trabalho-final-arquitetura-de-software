@@ -1,3 +1,9 @@
+// Banco relacional do PersonalHealth (contêiner "Banco relacional" do C4 nível 2).
+//
+// ADR 01: cada módulo do monólito é dono das suas tabelas, mesmo que todas
+// morem no mesmo banco. Por isso não há chave estrangeira entre tabelas de
+// módulos diferentes: um módulo só conhece o outro pelo identificador.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,171 +14,105 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// Conta
+// Módulo Acesso à Conta
 // ---------------------------------------------------------------------------
 
-model Holder {
-  id        String    @id @default(uuid()) @db.Uuid
-  fullName  String    @map("full_name")
-  email     String    @unique
-  password  String
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
+model Titular {
+  id        String   @id @db.Uuid
+  nome      String
+  email     String   @unique
+  senhaHash String   @map("senha_hash")
+  criadoEm  DateTime @default(now()) @map("criado_em")
 
-  records    HealthRecord[]
-  indicators Indicator[]
-  reminders  Reminder[]
+  sessoes Sessao[]
 
-  @@map("holders")
+  @@map("titulares")
+}
+
+// Uma sessão por aparelho. Revogar a sessão também desassocia o destino de
+// notificações daquele aparelho (ADR 04).
+model Sessao {
+  id           String    @id @db.Uuid
+  titularId    String    @map("titular_id") @db.Uuid
+  tokenHash    String    @unique @map("token_hash")
+  dispositivo  String
+  tokenEntrega String?   @map("token_entrega")
+  criadaEm     DateTime  @default(now()) @map("criada_em")
+  revogadaEm   DateTime? @map("revogada_em")
+
+  titular Titular @relation(fields: [titularId], references: [id])
+
+  @@index([titularId])
+  @@map("sessoes")
 }
 
 // ---------------------------------------------------------------------------
-// Histórico
+// Módulo Histórico
 // ---------------------------------------------------------------------------
 
-enum HealthRecordKind {
-  CONSULTATION
-  EXAM
-  VACCINE
-  PRESCRIPTION
-  OTHER
+model Consulta {
+  id            String    @id @db.Uuid
+  titularId     String    @map("titular_id") @db.Uuid
+  dataHora      DateTime  @map("data_hora") // data do acontecimento
+  especialidade String
+  profissional  String?
+  local         String?
+  motivo        String?
+  anotacoes     String?
+  retornoEm     DateTime? @map("retorno_em")
+  registradaEm  DateTime  @map("registrada_em") // data de registro (campo distinto)
 
-  @@map("health_record_kind")
+  @@index([titularId, dataHora, id])
+  @@map("consultas")
 }
 
-model HealthRecord {
-  id          String           @id @default(uuid()) @db.Uuid
-  holderId    String           @map("holder_id") @db.Uuid
-  kind        HealthRecordKind
-  title       String
-  description String?
-  occurredAt  DateTime         @map("occurred_at")
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
+// ---------------------------------------------------------------------------
+// Módulo Lembretes (agendamento durável, ADR 03)
+// ---------------------------------------------------------------------------
 
-  holder      Holder       @relation(fields: [holderId], references: [id])
-  attachments Attachment[]
+enum EstadoAgendamento {
+  PENDENTE
+  ENVIADO
+  CANCELADO
+  FALHOU
 
-  @@index([holderId, occurredAt])
-  @@map("health_records")
+  @@map("estado_agendamento")
 }
 
-// Metadados do anexo; o binário fica no armazenamento de anexos.
-model Attachment {
+model Agendamento {
+  id           String            @id @db.Uuid
+  titularId    String            @map("titular_id") @db.Uuid
+  origemTipo   String            @map("origem_tipo") // CONSULTA (ou ocorrência de dose, fora deste fluxo)
+  origemId     String            @map("origem_id") @db.Uuid
+  instante     DateTime
+  estado       EstadoAgendamento @default(PENDENTE)
+  versao       Int               @default(1) // reagendar ou cancelar invalida a versão anterior
+  tentativas   Int               @default(0)
+  reservadoAte DateTime?         @map("reservado_ate") // reserva do processador / espera até a próxima tentativa
+  reserva      String?           @db.Uuid // qual reserva do processador detém o agendamento; só ela pode escrever
+  ultimoErro   String?           @map("ultimo_erro")
+  enviadoEm    DateTime?         @map("enviado_em")
+  criadoEm     DateTime          @default(now()) @map("criado_em")
+  atualizadoEm DateTime          @updatedAt @map("atualizado_em")
+
+  @@unique([origemTipo, origemId])
+  @@index([estado, instante])
+  @@map("agendamentos")
+}
+
+// ---------------------------------------------------------------------------
+// Trilha de auditoria (ADR 04): identidade, ação, resultado e instante,
+// sem copiar conteúdo clínico.
+// ---------------------------------------------------------------------------
+
+model RegistroAuditoria {
   id         String   @id @default(uuid()) @db.Uuid
-  recordId   String   @map("record_id") @db.Uuid
-  storageKey String   @unique @map("storage_key")
-  fileName   String   @map("file_name")
-  mimeType   String   @map("mime_type")
-  sizeBytes  Int      @map("size_bytes")
-  createdAt  DateTime @default(now()) @map("created_at")
+  identidade String?  @db.Uuid
+  acao       String
+  resultado  String
+  referencia String?
+  instante   DateTime @default(now())
 
-  record HealthRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
-
-  @@map("attachments")
-}
-
-// ---------------------------------------------------------------------------
-// Indicadores
-// ---------------------------------------------------------------------------
-
-model Indicator {
-  id         String   @id @default(uuid()) @db.Uuid
-  holderId   String   @map("holder_id") @db.Uuid
-  type       String   @db.VarChar(60)
-  value      Decimal  @db.Decimal(10, 2)
-  unit       String   @db.VarChar(20)
-  measuredAt DateTime @map("measured_at")
-  createdAt  DateTime @default(now()) @map("created_at")
-
-  holder Holder @relation(fields: [holderId], references: [id])
-
-  @@index([holderId, type, measuredAt])
-  @@map("indicators")
-}
-
-// ---------------------------------------------------------------------------
-// Lembretes (agendamentos)
-// ---------------------------------------------------------------------------
-
-enum ReminderStatus {
-  SCHEDULED
-  CANCELLED
-  DONE
-
-  @@map("reminder_status")
-}
-
-model Reminder {
-  id        String         @id @default(uuid()) @db.Uuid
-  holderId  String         @map("holder_id") @db.Uuid
-  title     String
-  notes     String?
-  remindAt  DateTime       @map("remind_at")
-  status    ReminderStatus @default(SCHEDULED)
-  createdAt DateTime       @default(now()) @map("created_at")
-  updatedAt DateTime       @updatedAt @map("updated_at")
-
-  holder        Holder                 @relation(fields: [holderId], references: [id])
-  notifications NotificationDelivery[]
-
-  @@index([holderId, remindAt])
-  @@map("reminders")
-}
-
-// Aviso reservado pelo processador; entregue ao provedor de notificações.
-enum NotificationStatus {
-  RESERVED
-  SENT
-  FAILED
-  CANCELLED
-
-  @@map("notification_status")
-}
-
-model NotificationDelivery {
-  id           String             @id @default(uuid()) @db.Uuid
-  reminderId   String             @map("reminder_id") @db.Uuid
-  scheduledFor DateTime           @map("scheduled_for")
-  status       NotificationStatus @default(RESERVED)
-  attempts     Int                @default(0)
-  lastError    String?            @map("last_error")
-  sentAt       DateTime?          @map("sent_at")
-  createdAt    DateTime           @default(now()) @map("created_at")
-  updatedAt    DateTime           @updatedAt @map("updated_at")
-
-  reminder Reminder @relation(fields: [reminderId], references: [id])
-
-  @@unique([reminderId, scheduledFor])
-  @@index([status, scheduledFor])
-  @@map("notification_deliveries")
-}
-
-// ---------------------------------------------------------------------------
-// Outbox de eventos (gravado na mesma transação da escrita de negócio)
-// ---------------------------------------------------------------------------
-
-enum OutboxStatus {
-  PENDING
-  PROCESSED
-  FAILED
-
-  @@map("outbox_status")
-}
-
-model OutboxEvent {
-  id            String       @id @default(uuid()) @db.Uuid
-  aggregateType String       @map("aggregate_type")
-  aggregateId   String       @map("aggregate_id") @db.Uuid
-  type          String
-  payload       Json
-  status        OutboxStatus @default(PENDING)
-  attempts      Int          @default(0)
-  lastError     String?      @map("last_error")
-  occurredAt    DateTime     @default(now()) @map("occurred_at")
-  processedAt   DateTime?    @map("processed_at")
-
-  @@index([status, occurredAt])
-  @@map("outbox_events")
+  @@index([identidade, instante])
+  @@map("auditoria")
 }

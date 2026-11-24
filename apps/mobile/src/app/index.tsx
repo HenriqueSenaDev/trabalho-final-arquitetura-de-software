@@ -1,71 +1,54 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { Botao, Campo, Erro } from '@/components/ui';
 import { colors } from '@/constants/colors';
-import { checkApiHealth } from '@/lib/api';
+import { entrar } from '@/lib/api';
 import { ApiError } from '@/lib/http-client';
+import { sessao } from '@/lib/sessao';
 
-type ApiStatus =
-  | { state: 'loading' }
-  | { state: 'online' }
-  | { state: 'offline'; message: string };
+/** Passo 1 do fluxo: o titular entra; a API devolve o token da sessão. */
+export default function EntrarScreen() {
+  const router = useRouter();
+  const [email, setEmail] = useState('ana@personalhealth.dev');
+  const [senha, setSenha] = useState('senha-da-ana');
+  const [ocupado, setOcupado] = useState(false);
+  const [erro, setErro] = useState('');
 
-export default function HomeScreen() {
-  const [status, setStatus] = useState<ApiStatus>({ state: 'loading' });
-
-  useEffect(() => {
-    checkApiHealth()
-      .then(() => setStatus({ state: 'online' }))
-      .catch((error: unknown) =>
-        setStatus({
-          state: 'offline',
-          message: error instanceof ApiError ? error.message : 'Falha inesperada.',
-        }),
-      );
-  }, []);
+  async function aoEntrar() {
+    setOcupado(true);
+    setErro('');
+    try {
+      sessao.iniciar(await entrar(email.trim(), senha));
+      router.replace('/linha-do-tempo');
+    } catch (falha) {
+      setErro(falha instanceof ApiError ? falha.message : 'Falha inesperada.');
+    } finally {
+      setOcupado(false);
+    }
+  }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>PersonalHealth</Text>
-      <Text style={styles.subtitle}>Seu histórico de saúde em um só lugar.</Text>
-
-      <View style={styles.card}>
-        {status.state === 'loading' && <ActivityIndicator color={colors.brand} />}
-        {status.state === 'online' && (
-          <Text style={[styles.status, { color: colors.success }]}>API de Saúde online</Text>
-        )}
-        {status.state === 'offline' && (
-          <Text style={[styles.status, { color: colors.danger }]}>{status.message}</Text>
-        )}
-      </View>
+    <View style={estilos.tela}>
+      <Text style={estilos.titulo}>PersonalHealth</Text>
+      <Text style={estilos.subtitulo}>Seu histórico de saúde em um só lugar.</Text>
+      <Campo
+        rotulo="E-mail"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        keyboardType="email-address"
+      />
+      <Campo rotulo="Senha" value={senha} onChangeText={setSenha} secureTextEntry />
+      <Erro>{erro}</Erro>
+      <Botao titulo="Entrar" onPress={aoEntrar} ocupado={ocupado} />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 24,
-    gap: 12,
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: colors.muted,
-  },
-  card: {
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: colors.card,
-  },
-  status: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
+const estilos = StyleSheet.create({
+  tela: { flex: 1, padding: 24, gap: 14, justifyContent: 'center' },
+  titulo: { fontSize: 28, fontWeight: '700', color: colors.text },
+  subtitulo: { fontSize: 16, color: colors.muted, marginBottom: 12 },
 });

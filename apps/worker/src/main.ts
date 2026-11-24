@@ -1,49 +1,75 @@
+/**
+ * Processador de lembretes (contêiner separado da API, ADR 01 e 03).
+ * Este arquivo é só a composição: escolhe os adaptadores e roda o laço.
+ */
 import { PrismaClient } from '@personal-health/database';
-import { config } from './config';
-import { errorMessage, logger } from './logger';
-import { createNotificationProvider } from './notifications/create-provider';
-import { NotificationDispatcher } from './notifications/notification-dispatcher';
-import { OutboxRelay } from './outbox/outbox-relay';
+import { PrismaAgendamentos } from './adaptadores/prisma-agendamentos';
+import { PrismaDestinos } from './adaptadores/prisma-destinos';
+import { ProvedorConsole } from './adaptadores/provedor-console';
+import { ProvedorHttp } from './adaptadores/provedor-http';
+import { registroJson } from './adaptadores/registro-json';
+import { EntregarAvisosDevidos } from './aplicacao/entregar-avisos-devidos';
+import { Configuracao, lerConfiguracao } from './configuracao';
+import { ProvedorDeNotificacoes } from './portas/provedor-de-notificacoes';
 
-async function main(): Promise<void> {
+function criarProvedor(configuracao: Configuracao): ProvedorDeNotificacoes {
+  switch (configuracao.provedor) {
+    case 'console':
+      return new ProvedorConsole(registroJson);
+    case 'http':
+      return new ProvedorHttp(
+        configuracao.provedorUrl,
+        configuracao.provedorToken,
+        configuracao.provedorTempoLimiteSegundos,
+      );
+    default:
+      throw new Error(`Provedor de notificações desconhecido: ${configuracao.provedor}`);
+  }
+}
+
+const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function principal(): Promise<void> {
+  const configuracao = lerConfiguracao();
   const prisma = new PrismaClient();
   await prisma.$connect();
 
-  const relay = new OutboxRelay(prisma, config);
-  const dispatcher = new NotificationDispatcher(
-    prisma,
-    createNotificationProvider(config),
-    config,
+  const entregarAvisos = new EntregarAvisosDevidos(
+    new PrismaAgendamentos(prisma),
+    new PrismaDestinos(prisma),
+    criarProvedor(configuracao),
+    configuracao,
+    registroJson,
   );
 
-  let running = true;
-  const stop = (signal: string) => {
-    logger.info('Encerrando processador', { signal });
-    running = false;
+  let ativo = true;
+  const parar = (sinal: string) => {
+    if (!ativo) return;
+    registroJson.info('Encerrando o processador de lembretes', { sinal });
+    ativo = false;
   };
-  process.on('SIGINT', () => stop('SIGINT'));
-  process.on('SIGTERM', () => stop('SIGTERM'));
+  process.on('SIGINT', () => parar('SIGINT'));
+  process.on('SIGTERM', () => parar('SIGTERM'));
 
-  logger.info('Processador de eventos e lembretes iniciado', {
-    provider: config.notificationProvider,
-    pollIntervalMs: config.pollIntervalMs,
+  registroJson.info('Processador de lembretes iniciado', {
+    provedor: configuracao.provedor,
+    intervaloMs: configuracao.intervaloMs,
   });
 
-  while (running) {
+  while (ativo) {
     try {
-      const events = await relay.processBatch();
-      const notices = await dispatcher.processDue();
+      const reservados = await entregarAvisos.executarCiclo();
       // Lote cheio indica fila acumulada: segue drenando sem esperar.
-      if (events < config.batchSize && notices < config.batchSize) {
-        await new Promise((resolve) => setTimeout(resolve, config.pollIntervalMs));
+      if (reservados < configuracao.lote) {
+        await esperar(configuracao.intervaloMs);
       }
-    } catch (error) {
-      logger.error('Falha no ciclo do processador', { error: errorMessage(error) });
-      await new Promise((resolve) => setTimeout(resolve, config.pollIntervalMs));
+    } catch (erro) {
+      registroJson.erro('Falha no ciclo do processador', { erro: String(erro) });
+      await esperar(configuracao.intervaloMs);
     }
   }
 
   await prisma.$disconnect();
 }
 
-void main();
+void principal();
