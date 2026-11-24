@@ -12,6 +12,7 @@
     "test:e2e": "pnpm with-env tsx --test test/e2e/*.spec.ts"
   },
   "dependencies": {
+    "@personal-health/contracts": "workspace:*",
     "@personal-health/database": "workspace:*"
   },
   "devDependencies": {

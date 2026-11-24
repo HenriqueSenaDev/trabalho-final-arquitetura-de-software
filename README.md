@@ -112,6 +112,39 @@ sequenceDiagram
 
 O fluxo principal não usa armazenamento de anexos, backup, restauração nem repositório de backup (ADR 05), e também não inclui indicadores, medicamentos nem a recuperação de acesso por canal verificado. Do RF5 há só listar e revogar as sessões do titular. Essas partes continuam no documento e nos diagramas C4.
 
+### Escopo secundário: exames, anexos e tratamentos
+
+O módulo Histórico representa os agregados `Exame`, `Anexo` e `Tratamento`, casos de uso, DTOs, controllers, portas e adaptadores. Os contratos de leitura `ExameNaLinhaDoTempo` e `TratamentoNaLinhaDoTempo` ficam em `modulos/historico/contrato.ts`; a projeção da Linha do Tempo não foi alterada.
+
+#### Divergências deliberadas das figuras 10 e 11
+
+- **Figura 10:** `ArmazenamentoAnexos` oferece `armazenar`, `recuperar` e `excluir`, em vez de `createUploadUrl`, `inspect` e `createDownloadUrl`. `Exame` é um agregado separado, em vez de anexo de `HealthRecord`. O caso de uso valida titularidade e limite antes do armazenamento; se persistir a referência falhar, tenta excluir o arquivo como compensação. O contrato de validação declara PDF, JPEG e PNG, até cinco anexos e 10 MB por arquivo. O adaptador real deve verificar o conteúdo pela assinatura do arquivo, não confiar no MIME declarado.
+- **Figura 11:** o contrato compartilhado publica `TreatmentChanged` e `TreatmentEnded`; o Histórico grava via `RepositorioTratamentos` e publica via `PublicadorEventos` na mesma `UnidadeDeTrabalho`, em vez de `saveWithEvent`. O stub de publicação documenta que a implementação real precisa usar a mesma conexão/transação (outbox), nunca uma conexão separada. No worker, `RevisarOcorrenciasDeTratamento` encaminha para `RevisorOcorrencias`, em vez de `ReviseOccurrencesHandler`/`DoseSchedule`. Não calcula ocorrências de doses.
+- A representação do worker **não está conectada ao loop principal nem a um transporte real de eventos**. O adaptador de publicação, os repositórios Prisma, o armazenamento e o validador são stubs; não há persistência real de exames/tratamentos nem upload/download de arquivos.
+
+#### O que funciona e o que é stub
+
+- **Funcional:** o fluxo principal de consultas; regras de domínio de exames, anexos e tratamentos; validação dos formatos/limites representados; casos de uso testáveis por portas; encaminhamento de eventos do worker por seu contrato; e respostas uniformes para recursos inexistentes ou de outro titular.
+- **Stub:** endpoints secundários não concluem operações e respondem `503 Service Unavailable`; repositórios Prisma secundários não persistem; armazenamento e validador não integram serviço externo; publicação não grava outbox real; e o worker não consome eventos no processo principal. Assim, não há resposta fictícia de sucesso para essas operações.
+
+```mermaid
+flowchart LR
+    EC["ExamesController"] --> RX["Registrar/Alterar/Consultar/ExcluirExame"]
+    AC["AnexosController"] --> AX["Adicionar/Recuperar/RemoverAnexo"]
+    TC["TratamentosController"] --> ST["SaveTreatmentUseCase"]
+    RX --> EX["Exame"]
+    AX --> EX
+    EX --> AN["Anexo"]
+    RX --> RE(["RepositorioExames"])
+    AX --> RE
+    AX --> SA(["ArmazenamentoAnexos"])
+    ST --> TR["Tratamento"]
+    ST --> RT(["RepositorioTratamentos"])
+    ST --> PE(["PublicadorEventos<br/>packages/contracts"])
+    PE -. TreatmentChanged / TreatmentEnded .-> WH["RevisarOcorrenciasDeTratamento<br/>apps/worker"]
+    WH --> RO(["RevisorOcorrencias"])
+```
+
 ### API: monólito modular com portas e adaptadores (ADR 01)
 
 Os módulos são os componentes do C3. Todos seguem a mesma estrutura:

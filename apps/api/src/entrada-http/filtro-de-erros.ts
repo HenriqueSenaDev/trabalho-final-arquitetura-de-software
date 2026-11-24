@@ -26,5 +26,6 @@ function statusDe(erro: ErroDeDominio): HttpStatus {
   if (erro instanceof RecursoIndisponivelErro) return HttpStatus.NOT_FOUND;
   if (erro instanceof CredenciaisInvalidasErro) return HttpStatus.UNAUTHORIZED;
   if (erro instanceof ConflitoErro) return HttpStatus.CONFLICT;
+  if (erro instanceof FuncionalidadeIndisponivelErro) return HttpStatus.SERVICE_UNAVAILABLE;
   return HttpStatus.UNPROCESSABLE_ENTITY;
 }
