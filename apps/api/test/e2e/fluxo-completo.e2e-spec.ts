@@ -7,6 +7,7 @@
  *   docker compose up -d && pnpm test:e2e
  */
 import { INestApplication } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@personal-health/database';
 import { prepararBancoDeTeste } from '@personal-health/database/dist/banco-de-teste';
@@ -24,9 +25,17 @@ import {
 } from '../../../worker/src/portas/provedor-de-notificacoes';
 import { Registro } from '../../../worker/src/portas/registro';
 import { AppModule } from '../../src/app.module';
+import { ContextoPrisma } from '../../src/compartilhado/adaptadores/contexto-prisma';
+import { PrismaRepositorioAgendamentos } from '../../src/modulos/lembretes/adaptadores/saida/prisma-repositorio-agendamentos';
+import { Agendamento } from '../../src/modulos/lembretes/dominio/agendamento';
+import { PublicadorEventos } from '../../src/modulos/lembretes/portas/eventos';
 import { gerarHashDeSenha } from '../../src/modulos/acesso-conta/adaptadores/saida/scrypt';
 
-const ANA = { id: '0b6f6c1e-6b1a-4c43-9a51-6f1f0d7a0001', email: 'ana@teste.dev', senha: 'senha-da-ana' };
+const ANA = {
+  id: '0b6f6c1e-6b1a-4c43-9a51-6f1f0d7a0001',
+  email: 'ana@teste.dev',
+  senha: 'senha-da-ana',
+};
 const UM_DIA = 24 * 60;
 const daqui = (dias: number) => new Date(Date.now() + dias * 24 * 60 * 60 * 1000);
 
@@ -49,7 +58,11 @@ class AgendamentosComIntervalo extends PrismaAgendamentos {
   }
 }
 
-const registroMudo: Registro = { info: () => undefined, aviso: () => undefined, erro: () => undefined };
+const registroMudo: Registro = {
+  info: () => undefined,
+  aviso: () => undefined,
+  erro: () => undefined,
+};
 
 describe('Fluxo completo: aplicativo → API → banco → processador → provedor', () => {
   let app: INestApplication;
@@ -72,7 +85,11 @@ describe('Fluxo completo: aplicativo → API → banco → processador → prove
     const resposta = await api()
       .post('/consultas')
       .auth(tokenDaAna, { type: 'bearer' })
-      .send({ dataHora: daqui(dias), especialidade: 'Cardiologia', lembrete: { antecedenciaMinutos: UM_DIA } })
+      .send({
+        dataHora: daqui(dias),
+        especialidade: 'Cardiologia',
+        lembrete: { antecedenciaMinutos: UM_DIA },
+      })
       .expect(201);
     return resposta.body.id as string;
   };
@@ -86,7 +103,12 @@ describe('Fluxo completo: aplicativo → API → banco → processador → prove
     await prepararBancoDeTeste('personalhealth_e2e_fluxo_completo');
     prisma = new PrismaClient();
     await prisma.titular.create({
-      data: { id: ANA.id, nome: 'Ana', email: ANA.email, senhaHash: await gerarHashDeSenha(ANA.senha) },
+      data: {
+        id: ANA.id,
+        nome: 'Ana',
+        email: ANA.email,
+        senhaHash: await gerarHashDeSenha(ANA.senha),
+      },
     });
 
     const modulo = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -114,10 +136,37 @@ describe('Fluxo completo: aplicativo → API → banco → processador → prove
     await prisma?.$disconnect();
   });
 
+  it('reverte agendamento e evento juntos quando a transação falha', async () => {
+    const consultaId = randomUUID();
+    const agendamento = Agendamento.paraConsulta(
+      { titularId: ANA.id, consultaId, instante: daqui(3) },
+      new Date(),
+    );
+    const id = agendamento.paraGravacao().id;
+    const contexto = app.get(ContextoPrisma);
+    const repositorio = new PrismaRepositorioAgendamentos(contexto, app.get(PublicadorEventos));
+    await expect(
+      contexto.emTransacao(async () => {
+        await repositorio.salvar(agendamento);
+        throw new Error('falha simulada');
+      }),
+    ).rejects.toThrow('falha simulada');
+    expect(await prisma.agendamento.findUnique({ where: { id } })).toBeNull();
+    const eventos = await prisma.$queryRaw<
+      Array<{ id: string }>
+    >`SELECT id FROM eventos_outbox WHERE origem_id = ${id}::uuid`;
+    expect(eventos).toHaveLength(0);
+  });
+
   it('o titular registra a consulta pelo app e o aviso chega ao aparelho dele, uma vez', async () => {
     const sessao = await api()
       .post('/sessoes')
-      .send({ email: ANA.email, senha: ANA.senha, dispositivo: 'android', tokenEntrega: 'celular-antigo' })
+      .send({
+        email: ANA.email,
+        senha: ANA.senha,
+        dispositivo: 'android',
+        tokenEntrega: 'celular-antigo',
+      })
       .expect(201);
     tokenDaAna = sessao.body.token;
     sessaoDoCelularAntigo = sessao.body.sessaoId;
@@ -129,10 +178,17 @@ describe('Fluxo completo: aplicativo → API → banco → processador → prove
     await processador.executarCiclo(); // um segundo ciclo não reenvia
 
     const { id: agendamentoId } = await agendamentoDa(consultaId);
+    const eventos = await prisma.$queryRaw<Array<{ tipo: string; versao: number }>>`
+      SELECT tipo, versao FROM eventos_outbox WHERE origem_id = ${agendamentoId}::uuid`;
+    expect(eventos).toEqual([{ tipo: 'ReminderChanged', versao: 1 }]);
     expect(provedor.pedidos).toEqual([
       { chave: `${agendamentoId}:v1`, destinos: ['celular-antigo'], mensagem: MENSAGEM_GENERICA },
     ]);
-    expect(await agendamentoDa(consultaId)).toMatchObject({ estado: 'ENVIADO', versao: 1, reserva: null });
+    expect(await agendamentoDa(consultaId)).toMatchObject({
+      estado: 'ENVIADO',
+      versao: 1,
+      reserva: null,
+    });
   });
 
   it('critério de aceite: ao reagendar, só a nova versão do aviso pode ser entregue', async () => {
@@ -149,7 +205,11 @@ describe('Fluxo completo: aplicativo → API → banco → processador → prove
     };
     await processador.executarCiclo();
     expect(provedor.pedidos).toEqual([]);
-    expect(await agendamentoDa(consultaId)).toMatchObject({ estado: 'PENDENTE', versao: 2, reserva: null });
+    expect(await agendamentoDa(consultaId)).toMatchObject({
+      estado: 'PENDENTE',
+      versao: 2,
+      reserva: null,
+    });
 
     agendamentos.aposReservar = async () => undefined;
     await vencerAvisoDa(consultaId);
@@ -175,7 +235,12 @@ describe('Fluxo completo: aplicativo → API → banco → processador → prove
   it('Recuperação: o celular antigo revogado deixa de receber, o novo recebe', async () => {
     const novo = await api()
       .post('/sessoes')
-      .send({ email: ANA.email, senha: ANA.senha, dispositivo: 'ios', tokenEntrega: 'celular-novo' })
+      .send({
+        email: ANA.email,
+        senha: ANA.senha,
+        dispositivo: 'ios',
+        tokenEntrega: 'celular-novo',
+      })
       .expect(201);
     tokenDaAna = novo.body.token;
 

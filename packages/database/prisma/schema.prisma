@@ -100,6 +100,19 @@ model Agendamento {
   @@map("agendamentos")
 }
 
+model EventoOutbox {
+  id           String    @id @db.Uuid
+  tipo         String
+  origemId     String    @map("origem_id") @db.Uuid
+  titularId    String    @map("titular_id") @db.Uuid
+  versao       Int
+  criadoEm     DateTime  @default(now()) @map("criado_em") @db.Timestamptz
+  processadoEm DateTime? @map("processado_em") @db.Timestamptz
+
+  @@unique([tipo, origemId, versao])
+  @@map("eventos_outbox")
+}
+
 // ---------------------------------------------------------------------------
 // Trilha de auditoria (ADR 04): identidade, ação, resultado e instante,
 // sem copiar conteúdo clínico.

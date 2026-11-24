@@ -34,3 +34,9 @@ export class CredenciaisInvalidasErro extends ErroDeDominio {
     super('E-mail ou senha incorretos.');
   }
 }
+
+export class FuncionalidadeIndisponivelErro extends ErroDeDominio {
+  constructor() {
+    super('Funcionalidade ainda não disponível.');
+  }
+}

@@ -1,15 +1,20 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma } from '@personal-health/database';
 import { ContextoPrisma } from '../../../../compartilhado/adaptadores/contexto-prisma';
 import { ConflitoErro } from '../../../../compartilhado/dominio/erros';
 import { Agendamento } from '../../dominio/agendamento';
 import { RepositorioAgendamentos } from '../../portas/repositorio-agendamentos';
+import { PublicadorEventos } from '../../portas/eventos';
 
 const MUDOU_NO_MEIO_TEMPO = 'O aviso foi alterado por outra operação. Tente de novo.';
 
 @Injectable()
 export class PrismaRepositorioAgendamentos extends RepositorioAgendamentos {
-  constructor(private readonly contexto: ContextoPrisma) {
+  constructor(
+    private readonly contexto: ContextoPrisma,
+    private readonly eventos: PublicadorEventos,
+  ) {
     super();
   }
 
@@ -41,6 +46,7 @@ export class PrismaRepositorioAgendamentos extends RepositorioAgendamentos {
         await this.contexto.cliente.agendamento.create({
           data: { ...dados, origemTipo: origem.tipo, origemId: origem.id },
         });
+        await this.registrarEvento(dados);
       } catch (erro) {
         // Duas operações criaram o aviso da mesma consulta ao mesmo tempo.
         if (erro instanceof Prisma.PrismaClientKnownRequestError && erro.code === 'P2002') {
@@ -69,5 +75,22 @@ export class PrismaRepositorioAgendamentos extends RepositorioAgendamentos {
     if (count !== 1) {
       throw new ConflitoErro(MUDOU_NO_MEIO_TEMPO);
     }
+    await this.registrarEvento(dados);
+  }
+
+  private async registrarEvento(dados: {
+    id: string;
+    titularId: string;
+    versao: number;
+    estado: string;
+  }): Promise<void> {
+    await this.eventos.publicar({
+      id: randomUUID(),
+      tipo: dados.estado === 'CANCELADO' ? 'ReminderCancelled' : 'ReminderChanged',
+      origemId: dados.id,
+      titularId: dados.titularId,
+      versao: dados.versao,
+      ocorridoEm: new Date(),
+    });
   }
 }

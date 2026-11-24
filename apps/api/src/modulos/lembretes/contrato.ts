@@ -8,6 +8,30 @@
  */
 export type EstadoDoAviso = 'PENDENTE' | 'ENVIADO' | 'CANCELADO' | 'FALHOU';
 
+export type TipoEventoLembretes =
+  | 'ConsultationChanged'
+  | 'ConsultationDeleted'
+  | 'TreatmentChanged'
+  | 'TreatmentEnded'
+  | 'ReminderChanged'
+  | 'ReminderCancelled';
+
+export interface EventoLembretes {
+  id: string;
+  tipo: TipoEventoLembretes;
+  origemId: string;
+  titularId: string;
+  versao: number;
+  ocorridoEm: Date;
+}
+
+export type ConsultationChanged = EventoLembretes & { tipo: 'ConsultationChanged' };
+export type ConsultationDeleted = EventoLembretes & { tipo: 'ConsultationDeleted' };
+export type TreatmentChanged = EventoLembretes & { tipo: 'TreatmentChanged' };
+export type TreatmentEnded = EventoLembretes & { tipo: 'TreatmentEnded' };
+export type ReminderChanged = EventoLembretes & { tipo: 'ReminderChanged' };
+export type ReminderCancelled = EventoLembretes & { tipo: 'ReminderCancelled' };
+
 export interface AvisoDeConsulta {
   instante: Date;
   estado: EstadoDoAviso;

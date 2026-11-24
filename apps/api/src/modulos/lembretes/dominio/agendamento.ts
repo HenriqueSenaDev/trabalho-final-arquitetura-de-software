@@ -10,6 +10,8 @@ export interface DadosAgendamento {
   instante: Date;
   estado: EstadoAgendamento;
   versao: number;
+  tentativas?: number;
+  reserva?: string | null;
 }
 
 /**
@@ -59,6 +61,14 @@ export class Agendamento {
     }
     this.dados = { ...this.dados, estado: 'CANCELADO', versao: this.dados.versao + 1 };
     return true;
+  }
+
+  registrarEntrega(): void {
+    throw new Error('Registro de entrega pertence ao processador de lembretes.');
+  }
+
+  registrarFalha(_motivo: string): void {
+    throw new Error('Registro de falha pertence ao processador de lembretes.');
   }
 
   get estado(): EstadoAgendamento {
