@@ -189,6 +189,15 @@ O teste `apps/api/test/unidade/arquitetura.spec.ts` verifica estas regras de dep
 
 ### Processador de lembretes (ADR 03)
 
+Ao criar, reagendar ou cancelar um aviso de consulta, a API grava também um
+evento técnico na tabela `eventos_outbox`, na mesma unidade de trabalho. O
+worker consome esses eventos em lotes com bloqueio transacional. Para manter o
+fluxo principal e a invalidação imediata de versões, o agendamento de consulta
+continua sendo atualizado pela API; o relay não recria versões antigas. Eventos
+de tipos ainda não suportados permanecem pendentes. A revisão de ocorrências de
+tratamentos e a resposta a doses são pontos de extensão estruturais; a rota
+`POST /ocorrencias-de-dose/:id/resposta` responde 503.
+
 O processador segue a mesma organização: o caso de uso `EntregarAvisosDevidos` depende de três portas (`RepositorioDeAgendamentos`, `DestinosDeNotificacao`, `ProvedorDeNotificacoes`), e `src/main.ts` só escolhe os adaptadores.
 
 - **Agendamento durável:** a API grava o agendamento com origem, titular, instante, estado e versão. O processador nunca recebe mensagens da API, apenas lê os agendamentos elegíveis no banco.

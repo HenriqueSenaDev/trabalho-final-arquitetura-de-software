@@ -35,9 +35,11 @@ export class CredenciaisInvalidasErro extends ErroDeDominio {
   }
 }
 
-/** Recurso reconhecido cuja infraestrutura ainda não foi disponibilizada. */
+/**
+ * A funcionalidade ou método ainda não está disponível/implementado (a Entrada HTTP responde 503).
+ */
 export class FuncionalidadeIndisponivelErro extends ErroDeDominio {
-  constructor() {
-    super('Esta funcionalidade está temporariamente indisponível.');
+  constructor(mensagem = 'Funcionalidade temporariamente indisponível.') {
+    super(mensagem);
   }
 }

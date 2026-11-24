@@ -1,7 +1,9 @@
 import { RegraVioladaErro } from '../../../compartilhado/dominio/erros';
 import { Relogio } from '../../../compartilhado/portas/relogio';
 import {
+  CursorLinhaDoTempo,
   FiltroLinhaDoTempo,
+  FiltrosLinhaDoTempo,
   ItemDaLinhaDoTempo,
   LeituraLinhaDoTempo,
   PosicaoNaLinhaDoTempo,
@@ -25,16 +27,20 @@ export interface GrupoDoMes {
   itens: ItemDaLinhaDoTempo[];
 }
 
-export interface PaginaLinhaDoTempo {
+export interface ResultadoLinhaDoTempo {
   proximos: ItemDaLinhaDoTempo[];
   passados: GrupoDoMes[];
   cursor: string | null;
 }
 
+export type PaginaLinhaDoTempo = ResultadoLinhaDoTempo;
+
 /**
  * Caso de uso (porta de entrada) da Linha do Tempo (RF2): separa os
  * acontecimentos futuros em "Próximos" e agrupa os passados por mês, do mais
  * recente para o mais antigo, com até 50 itens por página.
+ *
+ * Projeção consolidada dos registros persistidos pelos módulos de Histórico e Indicadores.
  */
 export class ConsultarLinhaDoTempo {
   constructor(
@@ -42,15 +48,44 @@ export class ConsultarLinhaDoTempo {
     private readonly relogio: Relogio,
   ) {}
 
-  async executar(pedido: PedidoLinhaDoTempo): Promise<PaginaLinhaDoTempo> {
+  async executar(pedido: PedidoLinhaDoTempo): Promise<ResultadoLinhaDoTempo>;
+  async executar(filtros: FiltrosLinhaDoTempo, titularId: string): Promise<ResultadoLinhaDoTempo>;
+  async executar(
+    pedidoOuFiltros: PedidoLinhaDoTempo | FiltrosLinhaDoTempo,
+    titularId?: string,
+  ): Promise<ResultadoLinhaDoTempo> {
+    let filtro: FiltroLinhaDoTempo;
+    let cursor: string | undefined;
+    let limiteInformado: number | undefined;
+    let fuso: string | undefined;
+
+    if (titularId) {
+      const filtros = pedidoOuFiltros as FiltrosLinhaDoTempo;
+      filtro = {
+        titularId,
+        tipos: filtros.tipos,
+        de: filtros.dataInicial ?? filtros.de,
+        ate: filtros.dataFinal ?? filtros.ate,
+      };
+      cursor = filtros.cursor;
+      limiteInformado = filtros.limite;
+      fuso = filtros.fusoHorario ?? filtros.fuso;
+    } else {
+      const pedido = pedidoOuFiltros as PedidoLinhaDoTempo;
+      filtro = pedido.filtro;
+      cursor = pedido.cursor;
+      limiteInformado = pedido.limite;
+      fuso = pedido.fuso;
+    }
+
     const agora = this.relogio.agora();
-    const limite = Math.min(Math.max(pedido.limite ?? LIMITE_POR_PAGINA, 1), LIMITE_POR_PAGINA);
-    const depoisDe = pedido.cursor ? lerCursor(pedido.cursor) : null;
-    const mesDe = formatadorDeMes(pedido.fuso ?? 'America/Fortaleza');
+    const limite = Math.min(Math.max(limiteInformado ?? LIMITE_POR_PAGINA, 1), LIMITE_POR_PAGINA);
+    const depoisDe = cursor ? lerCursor(cursor) : null;
+    const mesDe = formatadorDeMes(fuso ?? 'America/Fortaleza');
 
     // "Próximos" só na primeira página; as seguintes continuam o passado.
-    const proximos = depoisDe ? [] : await this.leitura.proximos(pedido.filtro, agora, limite);
-    const passados = await this.leitura.passados(pedido.filtro, agora, depoisDe, limite + 1);
+    const proximos = depoisDe ? [] : await this.leitura.proximos(filtro, agora, limite);
+    const passados = await this.leitura.passados(filtro, agora, depoisDe, limite + 1);
 
     const pagina = passados.slice(0, limite);
     const ultimo = pagina.at(-1);
@@ -93,7 +128,7 @@ function formatadorDeMes(fuso: string): (data: Date) => string {
 }
 
 function escreverCursor(item: ItemDaLinhaDoTempo): string {
-  const posicao: PosicaoNaLinhaDoTempo = { data: item.data, tipo: item.tipo, id: item.id };
+  const posicao: CursorLinhaDoTempo = { data: item.data, tipo: item.tipo, id: item.id };
   return Buffer.from(JSON.stringify(posicao)).toString('base64url');
 }
 

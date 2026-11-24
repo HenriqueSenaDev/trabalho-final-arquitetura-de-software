@@ -4,7 +4,18 @@
  */
 import { PrismaClient } from '@personal-health/database';
 import { PrismaAgendamentos } from './adaptadores/prisma-agendamentos';
+import {
+  OutboxDeTratamentosIndisponivel,
+  OcorrenciasDeTratamentoIndisponiveis,
+} from './adaptadores/estrutura-eventos';
+import { AgendaDeDoses } from './dominio/agenda-de-doses';
+import { RevisarOcorrencias } from './aplicacao/revisar-ocorrencias';
+import {
+  DespachanteEventos,
+  ProcessarEventosPendentes,
+} from './aplicacao/processar-eventos-pendentes';
 import { PrismaDestinos } from './adaptadores/prisma-destinos';
+import { PrismaRelayOutbox } from './adaptadores/prisma-relay-outbox';
 import { ProvedorConsole } from './adaptadores/provedor-console';
 import { ProvedorHttp } from './adaptadores/provedor-http';
 import { registroJson } from './adaptadores/registro-json';
@@ -41,6 +52,26 @@ async function principal(): Promise<void> {
     configuracao,
     registroJson,
   );
+  const relay = new PrismaRelayOutbox(prisma);
+
+  const revisar = new RevisarOcorrencias(
+    new AgendaDeDoses(),
+    new OcorrenciasDeTratamentoIndisponiveis(),
+    new PrismaAgendamentos(prisma),
+  );
+  const processarTratamentos = new ProcessarEventosPendentes(
+    new OutboxDeTratamentosIndisponivel(),
+    new DespachanteEventos({
+      TreatmentChanged: {
+        executar: async (evento) => {
+          if (evento.tipo !== 'TreatmentChanged') throw new Error('Tipo de evento inválido.');
+          await revisar.executar({ ...evento, tipo: 'TreatmentChanged' });
+        },
+      },
+    }),
+  );
+
+  void processarTratamentos;
 
   let ativo = true;
   const parar = (sinal: string) => {
@@ -57,6 +88,12 @@ async function principal(): Promise<void> {
   });
 
   while (ativo) {
+    try {
+      await relay.executar(configuracao.lote);
+    } catch (erro) {
+      registroJson.erro('Falha no consumo da outbox', { erro: String(erro) });
+    }
+
     try {
       const reservados = await entregarAvisos.executarCiclo();
       // Lote cheio indica fila acumulada: segue drenando sem esperar.
