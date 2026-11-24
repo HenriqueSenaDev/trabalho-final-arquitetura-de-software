@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Holder as HolderRow } from '@personal-health/database';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import { Holder } from '../domain/holder';
 import { HolderRepository } from '../domain/holder.repository';
@@ -18,9 +19,22 @@ export class PrismaHolderRepository extends HolderRepository {
     const row = await this.prisma.holder.findFirst({
       where: { id, deletedAt: null },
     });
-    if (!row) {
-      return null;
-    }
+    return row ? this.toDomain(row) : null;
+  }
+
+  async findByEmail(email: string): Promise<Holder | null> {
+    const row = await this.prisma.holder.findFirst({
+      where: { email: email.trim().toLowerCase(), deletedAt: null },
+    });
+    return row ? this.toDomain(row) : null;
+  }
+
+  async existsByEmail(email: string): Promise<boolean> {
+    const count = await this.prisma.holder.count({ where: { email } });
+    return count > 0;
+  }
+
+  private toDomain(row: HolderRow): Holder {
     return Holder.restore({
       id: row.id,
       fullName: row.fullName,
@@ -28,10 +42,5 @@ export class PrismaHolderRepository extends HolderRepository {
       passwordHash: row.password,
       createdAt: row.createdAt,
     });
-  }
-
-  async existsByEmail(email: string): Promise<boolean> {
-    const count = await this.prisma.holder.count({ where: { email } });
-    return count > 0;
   }
 }

@@ -21,6 +21,14 @@ class InMemoryReminderRepository extends ReminderRepository {
   async listByHolder(holderId: string): Promise<Reminder[]> {
     return [...this.items.values()].filter((item) => item.belongsTo(holderId));
   }
+
+  async findByRecord(holderId: string, recordId: string): Promise<Reminder | null> {
+    return (
+      [...this.items.values()].find(
+        (item) => item.belongsTo(holderId) && item.toSnapshot().recordId === recordId,
+      ) ?? null
+    );
+  }
 }
 
 const holderId = '7f1d2c4e-0000-4000-8000-000000000001';

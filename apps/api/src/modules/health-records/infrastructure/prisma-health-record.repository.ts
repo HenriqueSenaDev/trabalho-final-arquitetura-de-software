@@ -3,7 +3,7 @@ import {
   Attachment as AttachmentRow,
   HealthRecord as HealthRecordRow,
 } from '@personal-health/database';
-import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { TransactionContext } from '../../../infrastructure/database/transaction-context';
 import { toOutboxRows } from '../../../infrastructure/outbox/outbox';
 import { AttachmentProps, HealthRecord } from '../domain/health-record';
 import { HealthRecordRepository } from '../domain/health-record.repository';
@@ -12,26 +12,45 @@ type RowWithAttachments = HealthRecordRow & { attachments: AttachmentRow[] };
 
 @Injectable()
 export class PrismaHealthRecordRepository extends HealthRecordRepository {
-  constructor(private readonly prisma: PrismaService) {
+  constructor(private readonly db: TransactionContext) {
     super();
   }
 
-  async create(record: HealthRecord): Promise<void> {
+  async create(record: HealthRecord): Promise<boolean> {
     const { attachments: _attachments, ...data } = record.toSnapshot();
     const events = record.pullEvents();
 
-    await this.prisma.$transaction([
-      this.prisma.healthRecord.create({ data }),
-      this.prisma.outboxEvent.createMany({ data: toOutboxRows(events) }),
-    ]);
+    // Dentro da UnitOfWork da requisição, quando houver (consulta + aviso).
+    return this.db.run(async (client) => {
+      // ON CONFLICT DO NOTHING: um envio repetido com o mesmo id não duplica.
+      const { count } = await client.healthRecord.createMany({
+        data: [data],
+        skipDuplicates: true,
+      });
+      if (count === 0) {
+        return false;
+      }
+      await client.outboxEvent.createMany({ data: toOutboxRows(events) });
+      return true;
+    });
+  }
+
+  async update(record: HealthRecord): Promise<void> {
+    const { id, attachments: _attachments, holderId: _holderId, kind: _kind, createdAt: _createdAt, ...data } =
+      record.toSnapshot();
+    await this.db.run((client) => client.healthRecord.update({ where: { id }, data }));
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.db.run((client) => client.healthRecord.delete({ where: { id } }));
   }
 
   async addAttachment(recordId: string, attachment: AttachmentProps): Promise<void> {
-    await this.prisma.attachment.create({ data: { ...attachment, recordId } });
+    await this.db.client.attachment.create({ data: { ...attachment, recordId } });
   }
 
   async findById(id: string): Promise<HealthRecord | null> {
-    const row = await this.prisma.healthRecord.findUnique({
+    const row = await this.db.client.healthRecord.findUnique({
       where: { id },
       include: { attachments: true },
     });
@@ -39,7 +58,7 @@ export class PrismaHealthRecordRepository extends HealthRecordRepository {
   }
 
   async listByHolder(holderId: string): Promise<HealthRecord[]> {
-    const rows = await this.prisma.healthRecord.findMany({
+    const rows = await this.db.client.healthRecord.findMany({
       where: { holderId },
       include: { attachments: true },
       orderBy: { occurredAt: 'desc' },
@@ -55,6 +74,9 @@ export class PrismaHealthRecordRepository extends HealthRecordRepository {
       title: row.title,
       description: row.description,
       occurredAt: row.occurredAt,
+      professional: row.professional,
+      location: row.location,
+      followUpAt: row.followUpAt,
       createdAt: row.createdAt,
       attachments: row.attachments.map((attachment) => ({
         id: attachment.id,

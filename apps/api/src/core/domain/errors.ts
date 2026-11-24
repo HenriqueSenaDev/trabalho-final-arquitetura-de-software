@@ -18,3 +18,11 @@ export class ConflictError extends DomainError {
     this.name = 'ConflictError';
   }
 }
+
+/** E-mail ou senha não conferem; a mensagem não diz qual dos dois (401). */
+export class InvalidCredentialsError extends DomainError {
+  constructor() {
+    super('E-mail ou senha inválidos.');
+    this.name = 'InvalidCredentialsError';
+  }
+}

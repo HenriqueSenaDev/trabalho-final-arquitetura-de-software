@@ -16,7 +16,7 @@ export class HttpNotificationProvider implements NotificationProvider {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Idempotency-Key': notice.deliveryId,
+        'Idempotency-Key': notice.idempotencyKey,
         ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
       },
       body: JSON.stringify(notice),

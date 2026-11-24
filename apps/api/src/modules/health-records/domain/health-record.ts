@@ -29,8 +29,35 @@ export interface HealthRecordProps {
   title: string;
   description: string | null;
   occurredAt: Date;
+  /** Consulta (RF1.1): profissional, local e retorno vinculado. */
+  professional: string | null;
+  location: string | null;
+  followUpAt: Date | null;
   createdAt: Date;
   attachments: AttachmentProps[];
+}
+
+export interface HealthRecordInput {
+  /** Gerado pelo aplicativo quando ele quer poder repetir o envio sem duplicar. */
+  id?: string;
+  holderId: string;
+  kind: HealthRecordKind;
+  title: string;
+  description?: string | null;
+  occurredAt: Date;
+  professional?: string | null;
+  location?: string | null;
+  followUpAt?: Date | null;
+}
+
+/** Correção: campo ausente fica como está; `null` apaga um campo opcional. */
+export interface HealthRecordChanges {
+  title?: string;
+  description?: string | null;
+  occurredAt?: Date;
+  professional?: string | null;
+  location?: string | null;
+  followUpAt?: Date | null;
 }
 
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -46,34 +73,25 @@ export class HealthRecord extends AggregateRoot {
     super();
   }
 
-  static create(
-    input: {
-      holderId: string;
-      kind: HealthRecordKind;
-      title: string;
-      description?: string | null;
-      occurredAt: Date;
-    },
-    now = new Date(),
-  ): HealthRecord {
-    const title = input.title.trim();
-    if (!title) {
-      throw new DomainError('O registro precisa de um título.');
-    }
-    if (input.occurredAt.getTime() > now.getTime()) {
-      throw new DomainError('A data do registro não pode estar no futuro.');
-    }
-
-    const record = new HealthRecord({
-      id: randomUUID(),
-      holderId: input.holderId,
-      kind: input.kind,
-      title,
-      description: input.description ?? null,
-      occurredAt: input.occurredAt,
-      createdAt: now,
-      attachments: [],
-    });
+  static create(input: HealthRecordInput, now = new Date()): HealthRecord {
+    const record = new HealthRecord(
+      HealthRecord.validate(
+        {
+          id: input.id ?? randomUUID(),
+          holderId: input.holderId,
+          kind: input.kind,
+          title: input.title.trim(),
+          description: optionalText(input.description),
+          occurredAt: input.occurredAt,
+          professional: optionalText(input.professional),
+          location: optionalText(input.location),
+          followUpAt: input.followUpAt ?? null,
+          createdAt: now,
+          attachments: [],
+        },
+        now,
+      ),
+    );
 
     record.record({
       type: EVENT_TYPES.HEALTH_RECORD_CREATED,
@@ -93,6 +111,78 @@ export class HealthRecord extends AggregateRoot {
 
   static restore(props: HealthRecordProps): HealthRecord {
     return new HealthRecord({ ...props, attachments: [...props.attachments] });
+  }
+
+  /**
+   * Correção (invariantes da seção 4): mantém identidade, titular, tipo e
+   * data de registro; a nova data reposiciona o item na linha do tempo.
+   */
+  correct(changes: HealthRecordChanges, now = new Date()): HealthRecord {
+    const props = { ...this.props, attachments: [...this.props.attachments] };
+    if (changes.title !== undefined) props.title = changes.title.trim();
+    if (changes.description !== undefined) props.description = optionalText(changes.description);
+    if (changes.occurredAt !== undefined) props.occurredAt = changes.occurredAt;
+    if (changes.professional !== undefined) props.professional = optionalText(changes.professional);
+    if (changes.location !== undefined) props.location = optionalText(changes.location);
+    if (changes.followUpAt !== undefined) props.followUpAt = changes.followUpAt;
+    return new HealthRecord(HealthRecord.validate(props, now));
+  }
+
+  /**
+   * Instante do aviso pedido para a consulta. Só existe aviso para consulta
+   * futura, e ele não pode cair no passado.
+   */
+  reminderTimeFor(minutesBefore: number, now = new Date()): Date {
+    if (this.props.kind !== 'CONSULTATION') {
+      throw new DomainError('Só consultas têm aviso.');
+    }
+    if (this.props.occurredAt.getTime() <= now.getTime()) {
+      throw new DomainError('Só é possível pedir aviso para uma consulta futura.');
+    }
+    const remindAt = this.minutesBeforeOccurrence(minutesBefore);
+    if (remindAt.getTime() <= now.getTime()) {
+      throw new DomainError('Com essa antecedência o aviso ficaria no passado.');
+    }
+    return remindAt;
+  }
+
+  /**
+   * Remarcação sem novo pedido de aviso: mantém a antecedência se o aviso
+   * ainda couber no futuro; senão a consulta fica sem aviso (null).
+   */
+  keptReminderTime(minutesBefore: number, now = new Date()): Date | null {
+    const remindAt = this.minutesBeforeOccurrence(minutesBefore);
+    return this.props.occurredAt.getTime() > now.getTime() && remindAt.getTime() > now.getTime()
+      ? remindAt
+      : null;
+  }
+
+  /** Quantos minutos antes do acontecimento cai o instante informado. */
+  minutesBefore(instant: Date): number {
+    return Math.round((this.props.occurredAt.getTime() - instant.getTime()) / 60_000);
+  }
+
+  private minutesBeforeOccurrence(minutes: number): Date {
+    return new Date(this.props.occurredAt.getTime() - minutes * 60_000);
+  }
+
+  private static validate(props: HealthRecordProps, now: Date): HealthRecordProps {
+    if (!props.title) {
+      throw new DomainError('O registro precisa de um título.');
+    }
+    // RF1.1: consulta pode ser passada ou futura; os demais registros são do passado.
+    if (props.kind !== 'CONSULTATION' && props.occurredAt.getTime() > now.getTime()) {
+      throw new DomainError('A data do registro não pode estar no futuro.');
+    }
+    if (props.followUpAt) {
+      if (props.kind !== 'CONSULTATION') {
+        throw new DomainError('Só consultas têm retorno.');
+      }
+      if (props.followUpAt.getTime() <= props.occurredAt.getTime()) {
+        throw new DomainError('O retorno precisa ser posterior à consulta.');
+      }
+    }
+    return props;
   }
 
   /** Reserva a chave do anexo; o binário é enviado direto ao armazenamento. */
@@ -133,7 +223,24 @@ export class HealthRecord extends AggregateRoot {
     return this.props.holderId;
   }
 
+  get kind(): HealthRecordKind {
+    return this.props.kind;
+  }
+
+  get title(): string {
+    return this.props.title;
+  }
+
+  get occurredAt(): Date {
+    return this.props.occurredAt;
+  }
+
   toSnapshot(): HealthRecordProps {
     return { ...this.props, attachments: [...this.props.attachments] };
   }
+}
+
+function optionalText(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  return text ? text : null;
 }

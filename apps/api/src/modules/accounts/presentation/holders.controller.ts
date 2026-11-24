@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Public } from '../../../infrastructure/http/session.guard';
 import { GetHolderUseCase } from '../application/get-holder.use-case';
 import { RegisterHolderUseCase } from '../application/register-holder.use-case';
 import { PublicHolder } from '../domain/holder';
@@ -11,13 +12,15 @@ export class HoldersController {
     private readonly getHolder: GetHolderUseCase,
   ) {}
 
+  @Public()
   @Post()
   register(@Body() body: RegisterHolderDto): Promise<PublicHolder> {
     return this.registerHolder.execute(body);
   }
 
-  @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<PublicHolder> {
+  /** `:holderId` como nas outras rotas: a guarda só deixa passar o titular da sessão. */
+  @Get(':holderId')
+  findOne(@Param('holderId', ParseUUIDPipe) id: string): Promise<PublicHolder> {
     return this.getHolder.execute({ id });
   }
 }

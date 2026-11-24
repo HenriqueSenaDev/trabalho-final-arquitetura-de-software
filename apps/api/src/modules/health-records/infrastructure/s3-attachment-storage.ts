@@ -1,6 +1,11 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AttachmentStorage, SignedUrl } from '../application/attachment-storage.port';
 
@@ -34,6 +39,19 @@ export class S3AttachmentStorage extends AttachmentStorage {
 
   createDownloadUrl(key: string): Promise<SignedUrl> {
     return this.sign(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+
+  async deleteObjects(keys: string[]): Promise<void> {
+    try {
+      await this.client.send(
+        new DeleteObjectsCommand({
+          Bucket: this.bucket,
+          Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
+        }),
+      );
+    } catch (error) {
+      new Logger(S3AttachmentStorage.name).warn(`Anexos não removidos: ${String(error)}`);
+    }
   }
 
   private async sign(command: PutObjectCommand | GetObjectCommand): Promise<SignedUrl> {

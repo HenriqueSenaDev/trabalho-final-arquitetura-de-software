@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Audit } from '../../../infrastructure/http/audit.interceptor';
 import { ListIndicatorsUseCase } from '../application/list-indicators.use-case';
 import { RecordIndicatorUseCase } from '../application/record-indicator.use-case';
 import { IndicatorProps } from '../domain/indicator';
@@ -11,6 +12,7 @@ export class IndicatorsController {
     private readonly listIndicators: ListIndicatorsUseCase,
   ) {}
 
+  @Audit('indicator.record')
   @Post()
   record(
     @Param('holderId', ParseUUIDPipe) holderId: string,
@@ -19,6 +21,7 @@ export class IndicatorsController {
     return this.recordIndicator.execute({ holderId, ...body });
   }
 
+  @Audit('indicator.list')
   @Get()
   list(
     @Param('holderId', ParseUUIDPipe) holderId: string,

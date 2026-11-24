@@ -1,18 +1,10 @@
-import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { DomainErrorFilter } from './infrastructure/http/domain-error.filter';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-    }),
-  );
-  app.useGlobalFilters(new DomainErrorFilter());
+  // Validação, erros, sessão e auditoria: registrados em infrastructure/http/http.module.ts.
 
   app.enableCors();
   app.enableShutdownHooks();

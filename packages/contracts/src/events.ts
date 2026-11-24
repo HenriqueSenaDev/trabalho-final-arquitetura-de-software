@@ -5,6 +5,7 @@
  */
 export const EVENT_TYPES = {
   REMINDER_SCHEDULED: 'reminder.scheduled',
+  REMINDER_RESCHEDULED: 'reminder.rescheduled',
   REMINDER_CANCELLED: 'reminder.cancelled',
   HEALTH_RECORD_CREATED: 'health-record.created',
   INDICATOR_RECORDED: 'indicator.recorded',
@@ -17,11 +18,22 @@ export interface ReminderScheduledPayload {
   holderId: string;
   title: string;
   remindAt: string;
+  /** Versão do lembrete (ADR 03). Ausente em eventos antigos: vale 1. */
+  version?: number;
+}
+
+/** O lembrete ganhou novo horário: só a nova versão pode ser entregue. */
+export interface ReminderRescheduledPayload {
+  reminderId: string;
+  holderId: string;
+  remindAt: string;
+  version: number;
 }
 
 export interface ReminderCancelledPayload {
   reminderId: string;
   holderId: string;
+  version?: number;
 }
 
 export interface HealthRecordCreatedPayload {
@@ -42,6 +54,7 @@ export interface IndicatorRecordedPayload {
 
 export interface EventPayloads {
   [EVENT_TYPES.REMINDER_SCHEDULED]: ReminderScheduledPayload;
+  [EVENT_TYPES.REMINDER_RESCHEDULED]: ReminderRescheduledPayload;
   [EVENT_TYPES.REMINDER_CANCELLED]: ReminderCancelledPayload;
   [EVENT_TYPES.HEALTH_RECORD_CREATED]: HealthRecordCreatedPayload;
   [EVENT_TYPES.INDICATOR_RECORDED]: IndicatorRecordedPayload;

@@ -23,8 +23,26 @@ model Holder {
   records    HealthRecord[]
   indicators Indicator[]
   reminders  Reminder[]
+  sessions   Session[]
 
   @@map("holders")
+}
+
+// Sessão por aparelho (ADR 04): o servidor guarda só o hash do token. Revogar
+// a sessão invalida o token e desassocia o destino de notificações.
+model Session {
+  id            String    @id @default(uuid()) @db.Uuid
+  holderId      String    @map("holder_id") @db.Uuid
+  tokenHash     String    @unique @map("token_hash")
+  device        String    @db.VarChar(80)
+  deliveryToken String?   @map("delivery_token") @db.VarChar(255)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  revokedAt     DateTime? @map("revoked_at")
+
+  holder Holder @relation(fields: [holderId], references: [id])
+
+  @@index([holderId, revokedAt])
+  @@map("sessions")
 }
 
 // ---------------------------------------------------------------------------
@@ -48,6 +66,10 @@ model HealthRecord {
   title       String
   description String?
   occurredAt  DateTime         @map("occurred_at")
+  // Campos de consulta (RF1.1): profissional, local e retorno vinculado.
+  professional String?
+  location     String?
+  followUpAt   DateTime?       @map("follow_up_at")
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
 
@@ -107,10 +129,14 @@ enum ReminderStatus {
 model Reminder {
   id        String         @id @default(uuid()) @db.Uuid
   holderId  String         @map("holder_id") @db.Uuid
+  // Consulta de origem, quando o lembrete é o aviso de uma consulta.
+  recordId  String?        @unique @map("record_id") @db.Uuid
   title     String
   notes     String?
   remindAt  DateTime       @map("remind_at")
   status    ReminderStatus @default(SCHEDULED)
+  // Reagendar ou cancelar gera uma nova versão; só a vigente é entregue (ADR 03).
+  version   Int            @default(1)
   createdAt DateTime       @default(now()) @map("created_at")
   updatedAt DateTime       @updatedAt @map("updated_at")
 
@@ -134,6 +160,8 @@ enum NotificationStatus {
 model NotificationDelivery {
   id           String             @id @default(uuid()) @db.Uuid
   reminderId   String             @map("reminder_id") @db.Uuid
+  // Versão do lembrete que este aviso entrega; lembrete + versão é a chave de deduplicação.
+  version      Int                @default(1)
   scheduledFor DateTime           @map("scheduled_for")
   status       NotificationStatus @default(RESERVED)
   attempts     Int                @default(0)
@@ -144,7 +172,7 @@ model NotificationDelivery {
 
   reminder Reminder @relation(fields: [reminderId], references: [id])
 
-  @@unique([reminderId, scheduledFor])
+  @@unique([reminderId, version])
   @@index([status, scheduledFor])
   @@map("notification_deliveries")
 }
@@ -175,4 +203,30 @@ model OutboxEvent {
 
   @@index([status, occurredAt])
   @@map("outbox_events")
+}
+
+// ---------------------------------------------------------------------------
+// Trilha de auditoria (ADR 04): identidade, ação, resultado e instante, sem
+// conteúdo clínico. A referência é um identificador técnico.
+// ---------------------------------------------------------------------------
+
+enum AuditOutcome {
+  SUCCESS
+  DENIED
+  REJECTED
+  ERROR
+
+  @@map("audit_outcome")
+}
+
+model AuditLog {
+  id        String       @id @default(uuid()) @db.Uuid
+  holderId  String?      @map("holder_id") @db.Uuid
+  action    String       @db.VarChar(80)
+  outcome   AuditOutcome
+  reference String?      @db.VarChar(120)
+  at        DateTime     @default(now())
+
+  @@index([holderId, at])
+  @@map("audit_logs")
 }

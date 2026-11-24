@@ -8,6 +8,7 @@ import { Response } from 'express';
 import {
   ConflictError,
   DomainError,
+  InvalidCredentialsError,
   NotFoundError,
 } from '../../core/domain/errors';
 
@@ -21,7 +22,9 @@ export class DomainErrorFilter implements ExceptionFilter {
         ? HttpStatus.NOT_FOUND
         : error instanceof ConflictError
           ? HttpStatus.CONFLICT
-          : HttpStatus.UNPROCESSABLE_ENTITY;
+          : error instanceof InvalidCredentialsError
+            ? HttpStatus.UNAUTHORIZED
+            : HttpStatus.UNPROCESSABLE_ENTITY;
 
     response.status(status).json({ statusCode: status, message: error.message });
   }

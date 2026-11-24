@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
+import { Audit } from '../../../infrastructure/http/audit.interceptor';
 import { CancelReminderUseCase } from '../application/cancel-reminder.use-case';
 import { ListRemindersUseCase } from '../application/list-reminders.use-case';
 import { ScheduleReminderUseCase } from '../application/schedule-reminder.use-case';
@@ -21,6 +22,7 @@ export class RemindersController {
     private readonly listReminders: ListRemindersUseCase,
   ) {}
 
+  @Audit('reminder.schedule')
   @Post()
   schedule(
     @Param('holderId', ParseUUIDPipe) holderId: string,
@@ -29,6 +31,7 @@ export class RemindersController {
     return this.scheduleReminder.execute({ holderId, ...body });
   }
 
+  @Audit('reminder.list')
   @Get()
   list(
     @Param('holderId', ParseUUIDPipe) holderId: string,
@@ -36,6 +39,7 @@ export class RemindersController {
     return this.listReminders.execute({ holderId });
   }
 
+  @Audit('reminder.cancel')
   @Patch(':reminderId/cancel')
   cancel(
     @Param('holderId', ParseUUIDPipe) holderId: string,
