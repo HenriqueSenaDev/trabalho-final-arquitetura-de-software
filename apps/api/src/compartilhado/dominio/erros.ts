@@ -34,3 +34,12 @@ export class CredenciaisInvalidasErro extends ErroDeDominio {
     super('E-mail ou senha incorretos.');
   }
 }
+
+/**
+ * A funcionalidade ou método ainda não está disponível/implementado (a Entrada HTTP responde 503).
+ */
+export class FuncionalidadeIndisponivelErro extends ErroDeDominio {
+  constructor(mensagem = 'Funcionalidade temporariamente indisponível.') {
+    super(mensagem);
+  }
+}

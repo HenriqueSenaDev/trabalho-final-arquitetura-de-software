@@ -4,6 +4,7 @@ import {
   ConflitoErro,
   CredenciaisInvalidasErro,
   ErroDeDominio,
+  FuncionalidadeIndisponivelErro,
   RecursoIndisponivelErro,
 } from '../compartilhado/dominio/erros';
 
@@ -21,6 +22,7 @@ export class FiltroDeErrosDeDominio implements ExceptionFilter {
 }
 
 function statusDe(erro: ErroDeDominio): HttpStatus {
+  if (erro instanceof FuncionalidadeIndisponivelErro) return HttpStatus.SERVICE_UNAVAILABLE;
   if (erro instanceof RecursoIndisponivelErro) return HttpStatus.NOT_FOUND;
   if (erro instanceof CredenciaisInvalidasErro) return HttpStatus.UNAUTHORIZED;
   if (erro instanceof ConflitoErro) return HttpStatus.CONFLICT;

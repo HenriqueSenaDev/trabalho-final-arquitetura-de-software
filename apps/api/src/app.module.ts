@@ -3,6 +3,7 @@ import { CompartilhadoModule } from './compartilhado/compartilhado.module';
 import { EntradaHttpModule } from './entrada-http/entrada-http.module';
 import { AcessoContaModule } from './modulos/acesso-conta/acesso-conta.module';
 import { HistoricoModule } from './modulos/historico/historico.module';
+import { IndicadoresModule } from './modulos/indicadores/indicadores.module';
 import { LembretesModule } from './modulos/lembretes/lembretes.module';
 import { LinhaDoTempoModule } from './modulos/linha-do-tempo/linha-do-tempo.module';
 
@@ -16,6 +17,7 @@ import { LinhaDoTempoModule } from './modulos/linha-do-tempo/linha-do-tempo.modu
     EntradaHttpModule,
     AcessoContaModule,
     HistoricoModule,
+    IndicadoresModule,
     LembretesModule,
     LinhaDoTempoModule,
   ],
