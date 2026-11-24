@@ -23,8 +23,9 @@ interface LinhaProjetada {
  * tipo e identificador. É o único ponto da API que lê tabelas de outro
  * módulo, e só para leitura.
  *
- * As colunas são `timestamp` em UTC; os instantes entram como texto ISO
- * convertido para `timestamp`, o que independe do fuso da sessão do banco.
+ * Preserva as consultas SQL funcionais de consultas e retornos (fluxo principal)
+ * e representa estruturalmente a extensão da projeção para exames, tratamentos
+ * e medições de saúde, sem exigir tabelas funcionais para esses novos tipos.
  */
 @Injectable()
 export class SqlLeituraLinhaDoTempo extends LeituraLinhaDoTempo {
@@ -62,6 +63,56 @@ export class SqlLeituraLinhaDoTempo extends LeituraLinhaDoTempo {
     );
   }
 
+  /**
+   * Projeção funcional de consultas e retornos do módulo Histórico.
+   */
+  protected consultaSqlConsultasERetornos(titular: Prisma.Sql): Prisma.Sql {
+    return Prisma.sql`
+      SELECT 'CONSULTA'::text AS tipo, id, data_hora AS data, especialidade AS titulo, local AS detalhe
+        FROM consultas
+       WHERE titular_id = ${titular}
+      UNION ALL
+      SELECT 'RETORNO'::text, id, retorno_em, especialidade, profissional
+        FROM consultas
+       WHERE titular_id = ${titular} AND retorno_em IS NOT NULL
+    `;
+  }
+
+  /**
+   * Representação estrutural da extensão da projeção para exames (módulo Histórico).
+   * Acordo com Gabi: os exames possuem id, titular_id, data_hora, titulo e descricao.
+   * Não executa SQL funcional enquanto a tabela de exames não estiver integrada.
+   */
+  protected consultaSqlExames(_titular: Prisma.Sql): Prisma.Sql | null {
+    // Quando a tabela de exames estiver disponível:
+    // SELECT 'EXAME'::text AS tipo, id, data_hora AS data, titulo, local AS detalhe FROM exames WHERE titular_id = ${titular}
+    return null;
+  }
+
+  /**
+   * Representação estrutural da extensão da projeção para tratamentos (início e fim de medicação/tratamento).
+   * Acordo com Gabi: tratamentos possuem id, titular_id, inicio_em, fim_em, medicamento/nome.
+   * Não executa SQL funcional enquanto a tabela de tratamentos não estiver integrada.
+   */
+  protected consultaSqlTratamentos(_titular: Prisma.Sql): Prisma.Sql | null {
+    // Quando a tabela de tratamentos estiver disponível:
+    // SELECT 'INICIO_TRATAMENTO'::text AS tipo, id, inicio_em AS data, nome AS titulo, posologia AS detalhe FROM tratamentos ...
+    // UNION ALL
+    // SELECT 'FIM_TRATAMENTO'::text AS tipo, id, fim_em AS data, nome AS titulo, posologia AS detalhe FROM tratamentos ...
+    return null;
+  }
+
+  /**
+   * Representação estrutural da extensão da projeção para medições (módulo Indicadores).
+   * As medições possuem id, titular_id, data_hora, tipo e valor formatado com unidade.
+   * Não executa SQL funcional enquanto a persistência funcional de medições não estiver integrada.
+   */
+  protected consultaSqlMedicoes(_titular: Prisma.Sql): Prisma.Sql | null {
+    // Quando a tabela de medições estiver disponível:
+    // SELECT 'MEDICAO'::text AS tipo, id, data_hora AS data, tipo AS titulo, valor::text AS detalhe FROM medicoes WHERE titular_id = ${titular}
+    return null;
+  }
+
   private async ler(
     filtro: FiltroLinhaDoTempo,
     janela: Prisma.Sql,
@@ -72,18 +123,25 @@ export class SqlLeituraLinhaDoTempo extends LeituraLinhaDoTempo {
     const tipos = filtro.tipos?.length
       ? Prisma.sql`AND tipo = ANY(${filtro.tipos}::text[])`
       : Prisma.empty;
-    const de = filtro.de ? Prisma.sql`AND data >= ${utc(filtro.de)}` : Prisma.empty;
-    const ate = filtro.ate ? Prisma.sql`AND data < ${utc(filtro.ate)}` : Prisma.empty;
+    const deData = filtro.dataInicial ?? filtro.de;
+    const ateData = filtro.dataFinal ?? filtro.ate;
+    const de = deData ? Prisma.sql`AND data >= ${utc(deData)}` : Prisma.empty;
+    const ate = ateData ? Prisma.sql`AND data < ${utc(ateData)}` : Prisma.empty;
+
+    const subconsultas = [
+      this.consultaSqlConsultasERetornos(titular),
+      this.consultaSqlExames(titular),
+      this.consultaSqlTratamentos(titular),
+      this.consultaSqlMedicoes(titular),
+    ].filter((sql): sql is Prisma.Sql => sql !== null);
+
+    const corpo = subconsultas.length === 1
+      ? subconsultas[0]
+      : Prisma.join(subconsultas, ' UNION ALL ');
 
     const linhas = await this.contexto.cliente.$queryRaw<LinhaProjetada[]>`
       WITH linha AS (
-        SELECT 'CONSULTA'::text AS tipo, id, data_hora AS data, especialidade AS titulo, local AS detalhe
-          FROM consultas
-         WHERE titular_id = ${titular}
-        UNION ALL
-        SELECT 'RETORNO'::text, id, retorno_em, especialidade, profissional
-          FROM consultas
-         WHERE titular_id = ${titular} AND retorno_em IS NOT NULL
+        ${corpo}
       )
       SELECT tipo, id, data, titulo, detalhe
         FROM linha
@@ -92,7 +150,19 @@ export class SqlLeituraLinhaDoTempo extends LeituraLinhaDoTempo {
        LIMIT ${limite}
     `;
 
-    return linhas.map((linha) => ({ ...linha, data: new Date(linha.data) }));
+    return linhas.map((linha) => {
+      const data = new Date(linha.data);
+      return {
+        id: linha.id,
+        origemId: linha.id,
+        tipo: linha.tipo,
+        data,
+        dataHora: data,
+        titulo: linha.titulo,
+        detalhe: linha.detalhe,
+        resumo: linha.detalhe,
+      };
+    });
   }
 }
 
